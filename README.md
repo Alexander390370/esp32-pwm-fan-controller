@@ -145,6 +145,13 @@ The sketch is organized into four parts:
 
 This is a teaching project. The web UI has **no authentication** — anyone on the same network can toggle the LED. Only run this on a trusted LAN. For anything beyond a demo, add HTTP basic auth or a session token.
 
+## Related Work
+
+- **[OmniForge-Data-Annotation](https://github.com/Alexander390370/OmniForge-Data-Annotation)** — full-modal data annotation
+- **[sd-forge-8gb-vram-setup](https://github.com/Alexander390370/sd-forge-8gb-vram-setup)** — Stable Diffusion on the same 8GB card
+- **[esp32-edge-ai-security](https://github.com/Alexander390370/esp32-edge-ai-security)** — edge AI on the hardware side
+- **[esp32-pwm-fan-controller](https://github.com/Alexander390370/esp32-pwm-fan-controller)** — hardware-side firmware
+
 ## License
 
 Distributed under the MIT License. See [LICENSE](./LICENSE) for details.
