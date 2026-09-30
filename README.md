@@ -1,13 +1,17 @@
-# ESP32 PWM Fan Controller
+# ESP32 PWM Fan Controller with Web UI
 
-A DC motor speed controller driven by an ESP32. The potentiometer sets the PWM duty cycle, an S8050 transistor handles the current, and an OLED shows the live duty cycle.
+A DC motor speed controller driven by an ESP32, combining analog PWM control with a built-in web interface. The potentiometer sets the motor speed; a web page toggles a separate LED; the OLED shows live status including the device's IP address.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Platform: ESP32](https://img.shields.io/badge/Platform-ESP32-blue)
 
 ## Overview
 
-Driving a DC motor directly from an ESP32 GPIO will fry the pin. This project shows the standard fix: a small-signal NPN transistor (S8050) as a low-side switch, with a flyback diode across the motor to absorb the back-EMF when the motor shuts off. The potentiometer gives smooth, analog-style speed control from 0 to 100%.
+Driving a DC motor directly from an ESP32 GPIO will fry the pin. This project shows the standard fix: a small-signal NPN transistor (S8050) as a low-side switch, with a flyback diode across the motor to absorb the back-EMF when the motor shuts off.
+
+On top of that, it adds a **standalone web UI** served directly from the ESP32 (no external server required), letting you toggle a separate LED from any browser on the same network. The OLED displays the current IP, live PWM duty cycle, and web-controlled LED state.
+
+This makes it a compact demo of three things at once: **power electronics, web-served control, and hardware status feedback.**
 
 ## Hardware Bill of Materials
 
@@ -19,6 +23,7 @@ Driving a DC motor directly from an ESP32 GPIO will fry the pin. This project sh
 | Flyback diode | 1N4148 (small motors) / 1N4007 (larger) | 1 |
 | Base resistor | 220Ω | 1 |
 | Potentiometer | 10kΩ linear | 1 |
+| Indicator LED | 5mm LED + 220Ω current-limiting resistor | 1 |
 | OLED display | SSD1306 (I2C, 128x64) | 1 |
 | External supply | 5V (e.g. HW-131 battery box) | 1 |
 
@@ -31,6 +36,7 @@ Driving a DC motor directly from an ESP32 GPIO will fry the pin. This project sh
 | Potentiometer | Wiper (middle) | P34 |
 | Potentiometer | Left / Right | 3.3V / GND |
 | Transistor base | via 220Ω resistor | P27 |
+| Indicator LED | via 220Ω resistor | P26 |
 | OLED | SDA | P21 |
 | OLED | SCL | P22 |
 | Motor | + | 5V (external) |
@@ -50,31 +56,80 @@ Motor − ── Transistor collector (C)
 Transistor emitter (E) ── GND (shared with ESP32)
 Transistor base (B) ── 220Ω ── ESP32 P27
 1N4148 diode: cathode (silver stripe) to Motor +, anode to Motor −
+
+LED anode ── 220Ω ── ESP32 P26
+LED cathode ── GND
 ```
 
 **Common ground is mandatory.** The external 5V supply's GND and the ESP32's GND must be tied together, otherwise the transistor's base current has no return path and the motor won't spin.
 
-## Code
-
-See [`fan_controller.ino`](./fan_controller.ino) for the full source.
-
-The sketch reads the potentiometer via `analogRead()`, maps 0–4095 to a PWM duty cycle 0–255, and drives the transistor with `ledcWrite()`. PWM is configured at 1 kHz / 8-bit resolution — a good balance for small motors. The OLED shows the raw ADC value and the current duty cycle.
-
-## Quick Start
+## Repository Structure
 
 ```text
-1. Wire the circuit per the pin table above.
-2. Open fan_controller.ino in Arduino IDE.
-3. Install libraries via Sketch → Include Library → Manage Libraries:
+esp32-pwm-fan-controller/
+├── README.md
+├── LICENSE
+├── .gitignore
+├── fan_controller.ino
+└── config.example.h
+```
+
+## Setup
+
+### 1. Configure WiFi
+
+Copy `config.example.h` to `config.h` and fill in your WiFi credentials:
+
+```cpp
+const char* WIFI_SSID     = "YOUR_WIFI_SSID";
+const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+```
+
+> **Do not commit `config.h`.** It is listed in `.gitignore` and will not be pushed to GitHub.
+
+### 2. Wire the circuit
+
+Follow the pin table and wiring notes above.
+
+### 3. Flash the ESP32
+
+```text
+1. Open fan_controller.ino in Arduino IDE.
+2. Install libraries via Sketch → Include Library → Manage Libraries:
      - Adafruit SSD1306
      - Adafruit GFX
 4. Select "ESP32 Dev Module" (or your specific board) from Tools → Board.
 5. Select the correct COM port, then upload.
 ```
 
-**Expected result**: rotate the potentiometer — the OLED shows the ADC value and PWM duty cycle, and the motor speed changes smoothly from 0% to 100%.
+## Usage
 
-> 💡 If the OLED stays blank, check the I2C address. Most SSD1306 modules are `0x3C`, some are `0x3D`. Run an I2C scanner sketch to confirm.
+### Local control (potentiometer)
+
+Rotate the potentiometer — the OLED shows the ADC value and PWM duty cycle, and the motor speed changes smoothly from 0% to 100%.
+
+### Web control (LED toggle)
+
+After boot, the OLED displays the ESP32's assigned IP (e.g. `192.168.1.42`). Open that IP in any browser on the same network:
+
+```text
+http://<ESP32_IP>/
+```
+
+You'll see a simple control page with two buttons (LED ON / LED OFF). Clicking them triggers `fetch()` requests to `/led/on` and `/led/off` — the ESP32 drives P26 accordingly, and the page updates its status text.
+
+The OLED also reflects the LED state (`Web LED: ON/OFF`) so you can verify the command landed.
+
+## Code Overview
+
+The sketch is organized into four parts:
+
+1. **Pin definitions & globals** — motor PWM channel, LED state, OLED object, `WebServer` on port 80.
+2. **Web handlers** — `handleRoot()` serves an HTML page with inline CSS/JS; `handleLedOn()` / `handleLedOff()` toggle P26 and return a plain-text ack.
+3. **OLED refresh** — `updateOLED()` redraws the IP, PWM bar, and LED state at ~10 Hz (throttled via `millis()` to avoid blocking the web server).
+4. **Main loop** — `server.handleClient()` runs non-blockingly; `analogRead()` feeds `ledcWrite()` for smooth motor control.
+
+> 💡 **Why `millis()` for OLED updates?** Calling `display.display()` (I2C write) on every loop iteration would starve `server.handleClient()` and make the web UI feel laggy. Throttling to 10 Hz keeps both responsive.
 
 ## Engineering Pitfalls
 
@@ -84,6 +139,11 @@ The sketch reads the potentiometer via `analogRead()`, maps 0–4095 to a PWM du
 4. **Common ground.** External supply and ESP32 must share GND.
 5. **Potentiometer wiring.** Only the wiper goes to the ADC pin. Connecting either end to 3.3V *and* the wiper to GND will short the rail through the pot.
 6. **Audible motor whine.** If the motor emits a high-pitched sound, increase the LEDC PWM frequency (e.g. from 1 kHz to 20 kHz) in `ledcSetup()` to move it out of the audible range.
+7. **Browser cache during web UI development.** Mobile browsers aggressively cache `fetch()` GET responses. If your LED toggle seems stuck, append a cache-buster query parameter (e.g. `/led/on?t=Date.now()`) or use `fetch(url, {cache: 'no-store'})`.
+
+## Security Boundaries
+
+This is a teaching project. The web UI has **no authentication** — anyone on the same network can toggle the LED. Only run this on a trusted LAN. For anything beyond a demo, add HTTP basic auth or a session token.
 
 ## License
 
