@@ -16,6 +16,7 @@ Adafruit_SSD1306 display(128, 64, &Wire, -1);
 WebServer server(80);
 const int PWM_CHANNEL = 0;
 unsigned long lastOLEDUpdate = 0;
+int lastMotorSpeed = 0;     // matches the ledcWrite(0) in setup()
 
 // ================= Web Frontend =================
 void handleRoot() {
@@ -25,10 +26,10 @@ void handleRoot() {
   html += "button{padding:15px 30px;font-size:18px;margin:10px;cursor:pointer;border-radius:8px;}</style>";
   html += "</head><body>";
   html += "<h1>ESP32 Control Center</h1>";
-  html += "<p>Toggle the standalone LED below</p >";
+  html += "<p>Toggle the standalone LED below</p>";
   html += "<button onclick=\"control('/led/on')\" style='background:#4CAF50;color:white;'>LED ON</button>";
   html += "<button onclick=\"control('/led/off')\" style='background:#f44336;color:white;'>LED OFF</button>";
-  html += "<p id='status' style='color:gray;'>Waiting...</p >";
+  html += "<p id='status' style='color:gray;'>Waiting...</p>";
   html += "<script>";
   html += "function control(action) {";
   html += "  fetch(action).then(response => response.text()).then(data => {";
@@ -55,7 +56,7 @@ void handleLedOff() {
 }
 
 // ================= OLED Refresh =================
-void updateOLED(int potValue, int motorSpeed) {
+void updateOLED(int motorSpeed) {
   display.clearDisplay();
   display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
@@ -107,19 +108,24 @@ void setup() {
   server.on("/led/off",  handleLedOff);
   server.begin();
 
-  updateOLED(0, 0);
+  updateOLED(0);
 }
 
 // ================= Main Loop =================
 void loop() {
   server.handleClient();
 
-  int potValue    = analogRead(POT_PIN);
-  int motorSpeed  = map(potValue, 0, 4095, 0, 255);
-  ledcWrite(PWM_CHANNEL, motorSpeed);
+  int motorSpeed = map(analogRead(POT_PIN), 0, 4095, 0, 255);
+
+  // Only touch the PWM peripheral when the duty cycle actually changes: this
+  // loop runs far faster than the pot can move.
+  if (motorSpeed != lastMotorSpeed) {
+    ledcWrite(PWM_CHANNEL, motorSpeed);
+    lastMotorSpeed = motorSpeed;
+  }
 
   if (millis() - lastOLEDUpdate >= 100) {
-    updateOLED(potValue, motorSpeed);
+    updateOLED(motorSpeed);
     lastOLEDUpdate = millis();
   }
 }
